@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
-#include "DHT.h"
+#include <Wire.h>
 
 // ---------------- CONFIG WIFI ----------------
 const char* ssid = "Lucas";
@@ -18,6 +18,7 @@ const char* mqtt_topic_proximidade = "/sensors/esp32/proximidade";
 const char* mqtt_topic_temperatura = "/sensors/esp32/temperatura";
 const char* mqtt_topic_acelerador = "/sensors/esp32/acelerador";
 const char* mqtt_topic_freio = "/sensors/esp32/freio";
+const char* mqtt_topic_velocidade = "/sensors/esp32/velocidade";
 const char* mqtt_topic_sensores = "/sensor_monitors";
 
 WiFiClient espClient;
@@ -27,14 +28,11 @@ PubSubClient client(espClient);
 #define TRIG_PIN 5
 #define ECHO_PIN 25
 #define LED_CARRO 2
-#define LED_AIRBAG 4
-#define DHTPIN 18
-#define DHTTYPE DHT11
+#define LED_AIRBAG 4  
 #define PINO_ACELERADOR 34
 #define PINO_FREIO 17
+#define LM75_ADDR 0x48
 
-
-DHT dht(DHTPIN, DHTTYPE);
 
 // ---------------- INSTANCIANDO MUTEX ----------------
 SemaphoreHandle_t xMutex;
@@ -44,10 +42,13 @@ SemaphoreHandle_t xMutex;
 float distancia_cm = 0.0;
 float temperatura = 0.0;
 float velocidade = 0.0;
+float pedal = 0.0;
+float freio = 0.0;
+float acel = 0.0;
 bool carroLigado = false;
 bool airbagAtivado = false;
 bool colisaoDetectada = false;
-float pedal = 0.0;
+bool frenagem = false;
 const float VELOCIDADE_MAXIMA = 200.0;
 const float ACELERACAO_MAX = 2.0;
 const float FREIO_MOTOR = 0.5;
@@ -182,44 +183,89 @@ void taskProximidade(void* pvParameters) {
 
 
 
-// ---------------- FUNÇÃO PARA QUE ENVIA PARA O TÓPICO DE TEMPERATURA SEU VALOR ----------------
+// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE TEMPERATURA SEU VALOR ----------------
 void taskTemperatura(void* pvParameters) {
   for (;;) {
     if (carroLigado && !colisaoDetectada) {
-      float temp = dht.readTemperature();
+      Wire.beginTransmission(LM75_ADDR);
+      Wire.write(0x00);
+      Wire.endTransmission();
+      Wire.requestFrom(LM75_ADDR, 2);   
+      float temp;
+      if (Wire.available() >= 2) {
+        temp = ( ( (Wire.read() << 8) | Wire.read() )/ 256 )*10;
+      }else{
+        temp = -1000;
+      }
       if (!isnan(temp)) publishSensorData(mqtt_topic_temperatura, temp);
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
   }
 }
+// ---------------- FUNÇÃO LEITURA PEDAL DO ACELERADOR ----------------
+void taskPedalLeitura(void* pvParameters) {
+  for (;;) {
+    pedal = 100*(analogRead(PINO_ACELERADOR) / 4095.0);
+    if(pedal < 5){
+      pedal = 0;
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+}
 
-// ---------------- FUNÇÃO PARA QUE ENVIA PARA O TÓPICO DE ACELERAÇÃO SEU VALOR ----------------
+// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE ACELERAÇÃO SEU VALOR ----------------
 void taskAceleradorLeitura(void* pvParameters) {
   for (;;) {
-    float leitura = analogRead(PINO_ACELERADOR) / 4095.0;
     if (carroLigado && !colisaoDetectada) {
-      float acel = leitura * ACELERACAO_MAX;
-      velocidade += (leitura > 0.02) ? acel : 0;
-      velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+      if(frenagem){
+        acel = 0;
+      }else{
+        acel = pedal * ACELERACAO_MAX;
+      }
       publishSensorData(mqtt_topic_acelerador, acel);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
 
-// ---------------- FUNÇÃO PARA QUE ENVIA PARA O TÓPICO DE FREIO SEU VALOR ----------------
+// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE FREIO SEU VALOR ----------------
 void taskFreioLeitura(void* pvParameters) {
   for (;;) {
-    float leitura = analogRead(PINO_FREIO) / 4095.0;
+    freio = 100*(analogRead(PINO_FREIO) / 4095.0);
     if (carroLigado && !colisaoDetectada) {
-      float acel = leitura * FREIO_MOTOR;
-      velocidade -= (leitura > 0.02) ? acel : 0;
-      velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
-      publishSensorData(mqtt_topic_freio, acel);
+      if(freio >= 10){
+        frenagem = true;
+      }else{
+        frenagem = false;
+      }
+      publishSensorData(mqtt_topic_freio, frenagem);
     }
     vTaskDelay(pdMS_TO_TICKS(300));
   }
 }
+
+// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE VELOCIDADE SEU VALOR ----------------
+void taskVelocidadeLeitura(void* pvParameters){
+  for(;;){
+    if (carroLigado && !colisaoDetectada) {
+      if(acel > 0){
+        velocidade += (pedal > 0.02) ? acel : 0;
+        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+      }else if (acel == 0 && frenagem == true){
+        velocidade -= freio * FREIO_MOTOR;
+        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+      }else{
+        velocidade -= FREIO_MOTOR;
+        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+      }
+      publishSensorData(mqtt_topic_velocidade, velocidade);
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
+  }
+}
+
+      
+// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE FREIO SEU VALOR ----------------
 
 void taskIgnicao(void* pvParameters) {
   vTaskDelay(pdMS_TO_TICKS(5000));
@@ -237,7 +283,7 @@ void setup() {
   pinMode(LED_AIRBAG, OUTPUT);
   digitalWrite(LED_CARRO, LOW);
   digitalWrite(LED_AIRBAG, LOW);
-  dht.begin();
+  Wire.begin(); // SDA=GPIO 21, SCL=GPIO 22
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
   connectToMQTT();
@@ -250,6 +296,8 @@ void setup() {
   xTaskCreatePinnedToCore(taskTemperatura, "MQTT_Temp", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(taskAceleradorLeitura, "MQTT_Acelerador", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(taskFreioLeitura, "MQTT_Freio", 4096, NULL, 2, NULL, 1);
+   xTaskCreatePinnedToCore(taskPedalLeitura, "MQTT_Pedal", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskVelocidadeLeitura, "MQTT_Velocidade", 4096, NULL, 2, NULL, 1);
 }
 
 void loop() {}
