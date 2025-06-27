@@ -185,11 +185,21 @@ float readUltrasonicDistance() {
 // ---------------- FUNÇÃO PARA QUE ENVIA PARA O TÓPICO DE PROXIMIDADE SEU VALOR ----------------
 void taskProximidade(void* pvParameters) {
   for (;;) {
+
+    bool ligado = false;
+    bool colisao = false;
+
+    if (xSemaphoreTake(xMutex, portMAX_DELAY)) {
+      ligado = carroLigado;
+      colisao = colisaoDetectada;
+      xSemaphoreGive(xMutex);
+    }
+
     if (!client.connected()) connectToMQTT();
     client.loop();
 
     float leitura = readUltrasonicDistance();
-    if (carroLigado && !colisaoDetectada){
+    if (ligado && !colisao){
         publishSensorData(mqtt_topic_proximidade, leitura);
     }
     vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
@@ -296,14 +306,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void tasktratarFreio(void* pvParameters){
   for(;;){
-    if(freio != 0){
-      frenagem = true;
-      digitalWrite(LED_FREIO, HIGH);
-    }else{
-      frenagem = false;
-      digitalWrite(LED_FREIO, LOW);
+    if(carroLigado && !colisaoDetectada){
+      if(freio != 0){
+        frenagem = true;
+        digitalWrite(LED_FREIO, HIGH);
+      }else{
+        frenagem = false;
+        digitalWrite(LED_FREIO, LOW);
+      }
+      vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
   }
 }
 
@@ -311,28 +323,32 @@ void tasktratarFreio(void* pvParameters){
 
 void tasktratarCondInv(void* pvParameters){
   for(;;){
-    if(frenagem && acel != 0){
-      digitalWrite(LED_ERRO, HIGH);
-    }else{
-      digitalWrite(LED_ERRO, LOW);
+    if(carroLigado && !colisaoDetectada){
+      if(frenagem && acel != 0){
+        digitalWrite(LED_ERRO, HIGH);
+      }else{
+        digitalWrite(LED_ERRO, LOW);
+      }
+      vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
   }
 }
 
 // ---------------- Airbag -----------------
 void tasktratarAirbag(void* pvParameters){
   for(;;){
-    if(distancia_cm == 0){
-      digitalWrite(LED_ERRO, HIGH);
-      if (xSemaphoreTake(xMutex, portMAX_DELAY)) {
-        colisaoDetectada = true;
-        xSemaphoreGive(xMutex);
+    if(carroLigado && !colisaoDetectada){
+      if(distancia_cm == 0){
+        digitalWrite(LED_ERRO, HIGH);
+        if (xSemaphoreTake(xMutex, portMAX_DELAY)) {
+          colisaoDetectada = true;
+          xSemaphoreGive(xMutex);
+        }
+      }else{
+        digitalWrite(LED_ERRO, LOW);
       }
-    }else{
-      digitalWrite(LED_ERRO, LOW);
+      vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
   }
 }
 
