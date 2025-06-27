@@ -12,6 +12,7 @@ void tasktratarFreio(void* pvParameters){
       digitalWrite(LED_FREIO, LOW);
     }
   }
+  vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
 }
 
 // ---------------- FREIO E ACELERADOR ACIONADOS -----------------
@@ -24,6 +25,7 @@ void tasktratarCondInv(void* pvParameters){
       digitalWrite(LED_ERRO, LOW);
     }
   }
+  vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
 }
 
 // ---------------- Airbag -----------------
@@ -39,4 +41,5 @@ void tasktratarAirbag(void* pvParameters){
       digitalWrite(LED_ERRO, LOW);
     }
   }
+  vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
 }

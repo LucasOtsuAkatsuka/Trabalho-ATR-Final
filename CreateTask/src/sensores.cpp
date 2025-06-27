@@ -21,7 +21,7 @@ void taskProximidade(void* pvParameters) {
     if (carroLigado && !colisaoDetectada){
         publishSensorData(mqtt_topic_proximidade, leitura);
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeBaixa));
+    vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
   }
 }
 
@@ -62,7 +62,7 @@ void taskAceleradorLeitura(void* pvParameters) {
       }
       publishSensorData(mqtt_topic_acelerador, acel);
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeBaixa));
+    vTaskDelay(pdMS_TO_TICKS(timePriotidadeMedia));
   }
 }
 
@@ -76,7 +76,7 @@ void taskFreioLeitura(void* pvParameters) {
       }
       publishSensorData(mqtt_topic_freio, pedalfreio);
     }
-    vTaskDelay(pdMS_TO_TICKS(timePriotidadeBaixa));
+    vTaskDelay(pdMS_TO_TICKS(timePriotidadeAlta));
   }
 }
 

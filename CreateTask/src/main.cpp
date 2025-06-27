@@ -34,15 +34,18 @@ void setup() {
   client.subscribe(mqtt_topic_temperatura);
   client.subscribe(mqtt_topic_acelerador);
 
-  xTaskCreatePinnedToCore(taskSensorMonitorInfo, "MQTT_Sensores", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(taskIgnicao, "Ignicao", 2048, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(taskProximidade, "MQTT_Proximidade", 4096, NULL, 3, NULL, 1);
-  xTaskCreatePinnedToCore(taskAceleradorLeitura, "MQTT_Acelerador", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(taskFreioLeitura, "MQTT_Freio", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(taskVelocidadeLeitura, "MQTT_Velocidade", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(tasktratarFreio, "MQTT_Temp", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(tasktratarCondInv, "MQTT_Temp", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(tasktratarAirbag, "MQTT_Temp", 4096, NULL, 1, NULL, 1);
+  xTaskCreate(taskSensorMonitorInfo, "MQTT_Sensores", 4096, NULL, 1, NULL);
+  xTaskCreate(taskIgnicao, "Ignicao", 2048, NULL, 2, NULL);
+
+  xTaskCreate(taskProximidade, "MQTT_Proximidade", 4096, NULL, 3, NULL);
+  xTaskCreate(taskAceleradorLeitura, "MQTT_Acelerador", 4096, NULL, 2, NULL);
+  xTaskCreate(taskFreioLeitura, "MQTT_Freio", 4096, NULL, 3, NULL);
+  xTaskCreate(taskVelocidadeLeitura, "MQTT_Velocidade", 4096, NULL, 1, NULL);
+  xTaskCreate(taskMQTTTemperatura, "MQTT_Temp", 4096, NULL, 1, NULL);
+
+  xTaskCreate(tasktratarFreio, "TratarFreio", 4096, NULL, 3, NULL);
+  xTaskCreate(tasktratarCondInv, "TratarCondInv", 4096, NULL, 3, NULL);
+  xTaskCreate(tasktratarAirbag, "TratarAitbag", 4096, NULL, 3, NULL);
 }
 
 void loop() {}
