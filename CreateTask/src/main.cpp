@@ -20,6 +20,11 @@ const char* mqtt_topic_acelerador = "/sensors/esp32/acelerador";
 const char* mqtt_topic_freio = "/sensors/esp32/freio";
 const char* mqtt_topic_velocidade = "/sensors/esp32/velocidade";
 const char* mqtt_topic_sensores = "/sensor_monitors";
+const char* mqtt_topic_alarmefreio = "/alarmes/freio";
+
+// ---------------- Filas para os tópicos ----------------
+
+QueueHandle_t queue_alarme_freio = xQueueCreate(2, sizeof(u32_t));
 
 // ---------------- DEFININDO PINOS ----------------
 #define TRIG_PIN 5
@@ -129,6 +134,20 @@ void publishSensorMonitorInfo() {
   Serial.println(payload);
 }
 
+
+// ---------------- FUNÇÃO MQTT CALLBACK ----------------
+
+void callback(char* topic, byte* payload, unsigned int length) {
+
+  String mensagem;
+  for (int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
+  }
+
+  if (strcmp(topic, mqtt_topic_alarmefreio) == 0) {
+    xQueueSend(queue_alarme_freio, &mensagem, portMAX_DELAY);
+  } 
+}
 
 // ---------------- FUNÇÃO PARA USAR O SENSOR DE PROXIMIDADE ----------------
 float readUltrasonicDistance() {
@@ -307,6 +326,7 @@ void taskFreioLeitura(void* pvParameters) {
           digitalWrite(LED_FREIO, HIGH);
         }else{
           frenagem = false;
+          digitalWrite(LED_FREIO, LOW);
         }
         publishSensorData(mqtt_topic_freio, frenagem);
       xSemaphoreGive(xMutex);
@@ -337,7 +357,7 @@ void taskVelocidadeLeitura(void* pvParameters){
 }
 
       
-// ---------------- FUNÇÃO QUE ENVIA PARA O TÓPICO DE FREIO SEU VALOR ----------------
+// ---------------- FUNÇÃO QUE LIGA O CARRO ----------------
 
 void taskIgnicao(void* pvParameters) {
   vTaskDelay(pdMS_TO_TICKS(5000));
@@ -346,6 +366,24 @@ void taskIgnicao(void* pvParameters) {
   Serial.println("Carro ligado!");
   vTaskDelete(NULL);
 }
+
+// ---------------- TRATAMENTO DOS ALARMES -----------------
+
+// ---------------- FREIO E ACELERADOR ACIONADOS -----------------
+
+void alarmeFreio(void* pvParameters) {
+  for(;;){
+    char msg[5];
+    xQueueReceive(queue_alarme_freio, &msg, portMAX_DELAY);
+    if(strcmp(msg, "true ") == 0){
+      digitalWrite(LED_ERRO, HIGH);
+    }else{
+      digitalWrite(LED_ERRO, LOW);
+    }
+  }
+}
+
+
 
 void setup() {
   Serial.begin(9600);
@@ -361,9 +399,12 @@ void setup() {
   digitalWrite(LED_ERRO, LOW);
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
   connectToMQTT();
   publishSensorMonitorInfo();
   xMutex = xSemaphoreCreateMutex();
+
+  client.subscribe(mqtt_topic_alarmefreio);
 
   xTaskCreatePinnedToCore(taskSensorMonitorInfo, "MQTT_Sensores", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(taskIgnicao, "Ignicao", 2048, NULL, 2, NULL, 1);
