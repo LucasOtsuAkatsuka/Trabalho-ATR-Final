@@ -155,8 +155,18 @@ void publishSensorMonitorInfo() {
 
 // ---------------- FUNÇÃO PARA PUBLICAR VALORES DOS SENSORES NOS RESPECTIVOS TOPICOS ----------------
 void publishSensorData(const char* topic, float value) {
+  if (topic == nullptr || strlen(topic) == 0) {
+    Serial.println("Tópico inválido!");
+    return;
+  }
+
   if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
-    
+    if (!client.connected()) {
+      Serial.println("MQTT desconectado no publish!");
+      xSemaphoreGive(mqttMutex);
+      return;
+    }
+
     char timestamp[30];
     time_t now;
     struct tm timeinfo;
@@ -171,9 +181,12 @@ void publishSensorData(const char* topic, float value) {
     String payload;
     serializeJson(doc, payload);
 
-    client.publish(topic, payload.c_str());
-    Serial.printf("Enviado para %s: %s\n", topic, payload.c_str());
+    bool result = client.publish(topic, payload.c_str());
+    if (!result) {
+      Serial.println("Falha no publish MQTT");
+    }
 
+    Serial.printf("Enviado para %s: %s\n", topic, payload.c_str());
     xSemaphoreGive(mqttMutex);
   } else {
     Serial.println("Não foi possível obter o mutex para publicar MQTT.");
@@ -394,7 +407,7 @@ void tasktratarCondInv(void* pvParameters){
         digitalWrite(LED_ERRO, LOW);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(900));
+    vTaskDelay(pdMS_TO_TICKS(400));
   }
 }
 
@@ -484,9 +497,10 @@ void setup() {
   dht.begin();
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
+  
   connectToMQTT();
 
+  client.setCallback(callback);
   client.subscribe(mqtt_topic_freio_rec);
   client.subscribe(mqtt_topic_proximidade);
   client.subscribe(mqtt_topic_temperatura);
@@ -499,7 +513,7 @@ void setup() {
   xTaskCreatePinnedToCore(taskProximidade, "MProximidade", 4096, NULL, 3, NULL, 1);
   xTaskCreatePinnedToCore(taskAceleradorLeitura, "Acelerador", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(taskFreioLeitura, "Freio",4096, NULL, 3, NULL, 1);
-  xTaskCreatePinnedToCore(taskVelocidadeLeitura, "Velocidade", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskVelocidadeLeitura, "Velocidade", 4096, NULL, 3, NULL, 1);
   xTaskCreatePinnedToCore(tasktratarFreio, "Tratar_Freio", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(tasktratarCondInv, "Tratar_CondInv", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(tasktratarAirbag, "Airbag", 4096, NULL, 3, NULL, 1);
