@@ -24,22 +24,23 @@ const char* mqtt_topic_alarme = "/sensors/alarme";
 
 //-------- RECEBER ---------------
 const char* mqtt_topic_freio_rec = "/valor/freio";
+const char* mqtt_topic_acel_rec = "/valor/aceleracao";
 
 
 // ---------------- DEFININDO PINOS ----------------
 #define TRIG_PIN 5
-#define ECHO_PIN 25
+#define ECHO_PIN 18
 #define LED_CARRO 2
 #define LED_AIRBAG 4  
 #define LED_FREIO 15
 #define LED_ERRO 14
 #define LED_TEMPERATURA 26
-#define PINO_ACELERADOR 34
+#define PINO_ACELERADOR 33
 #define PINO_FREIO 35
 
 
 /* SENSOR TEMPERATURA */
-#define DHTPIN 18
+#define DHTPIN 13
 #define DHTTYPE DHT11
 
 WiFiClient espClient;
@@ -60,15 +61,15 @@ bool airbagAtivado = false;
 float distancia_cm = 10.0;
 float temperatura = 0.0;
 float velocidade = 0.0;
-float freio = 0.0;
 float acel = 0.0;
 bool colisaoDetectada = false;
 bool frenagem = false;
 const float VELOCIDADE_MAXIMA = 200.0;
 const float ACELERACAO_MAX = 2.0;
-const float FREIO_MOTOR = 0.5;
+const float FREIO_MOTOR = 2.0;
 float freioAnalogico = 0.0;
 float freioRecebidoMQTT = 0.0;
+float acelRecebidoMQTT = 0.0;
 
 // ---------------- FUNÇÃO WIFI ----------------
 void connectToWiFi() {
@@ -95,6 +96,10 @@ void connectToMQTT() {
   while (!client.connected()) {
     if (client.connect("ESP32Ultrassom")) {
       Serial.println("MQTT conectado.");
+      client.subscribe(mqtt_topic_freio_rec);  
+      client.subscribe(mqtt_topic_proximidade);
+      client.subscribe(mqtt_topic_temperatura);
+      client.subscribe(mqtt_topic_acel_rec);
       delay(2000); 
     } else {
       Serial.print("Erro MQTT: ");
@@ -154,7 +159,7 @@ void publishSensorMonitorInfo() {
 
 // ---------------- FUNÇÃO PARA PUBLICAR VALORES DOS SENSORES NOS RESPECTIVOS TOPICOS ----------------
 void publishSensorData(const char* topic, float value) {
-  if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(300))) {
+  if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
     
     char timestamp[30];
     time_t now;
@@ -211,7 +216,7 @@ void taskProximidade(void* pvParameters) {
     if (carroLigado && !colisaoDetectada){
         publishSensorData(mqtt_topic_proximidade, leitura);
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -238,14 +243,17 @@ void taskAceleradorLeitura(void* pvParameters) {
     }
 
     if (carroLigado && !colisaoDetectada) {
-      float pedalAcelerador = 100*(analogRead(PINO_ACELERADOR) / 4095.0);
-      if(pedalAcelerador < 10){
+      float sensorAcelerador = (analogRead(PINO_ACELERADOR));
+      float pedalAcelerador = (sensorAcelerador / 4095.0);
+      Serial.println("--------------------Sensor Acelerador---------------");
+      Serial.println(sensorAcelerador);
+      if(pedalAcelerador < 0.01){
         pedalAcelerador = 0;
       }
       acel = pedalAcelerador;
       publishSensorData(mqtt_topic_acelerador, acel);
     }
-    vTaskDelay(pdMS_TO_TICKS(600));
+    vTaskDelay(pdMS_TO_TICKS(800));
   }
 }
 
@@ -257,13 +265,16 @@ void taskFreioLeitura(void* pvParameters) {
     }
 
     if (carroLigado && !colisaoDetectada) {
-      freioAnalogico = 100*(analogRead(PINO_FREIO) / 4095.0);
-      if(freioAnalogico < 10){
+      float sensorFreio = (analogRead(PINO_FREIO));
+      freioAnalogico = (sensorFreio / 4095.0);
+      Serial.println("--------------------Sensor Freio---------------");
+      Serial.println(sensorFreio);
+      if(freioAnalogico < 0.01){
         freioAnalogico = 0;
       }
       publishSensorData(mqtt_topic_freio, freioAnalogico);
     }
-    vTaskDelay(pdMS_TO_TICKS(550));
+    vTaskDelay(pdMS_TO_TICKS(700));
   }
 }
  
@@ -287,34 +298,36 @@ void taskIgnicao(void* pvParameters) {
 // ---------------- FUNÇÃO MQTT CALLBACK ----------------
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  // 1) Converte para String
+
   String msg((char*)payload, length);
 
+  float valorRecebido = 0.0;
 
-  // 3) Valida formato: deve começar com '{' e terminar com '}'
-  if (length == 0 || msg[0] != '{' || msg[msg.length() - 1] != '}') {
-    Serial.println("Payload ignorado – não parece JSON completo.");
-    return;
+  
+  if (msg[0] == '{' && msg[msg.length() - 1] == '}') {
+    StaticJsonDocument<128> doc;
+    DeserializationError err = deserializeJson(doc, payload, length);
+    if (err) {
+      Serial.print("Erro JSON: ");
+      Serial.println(err.c_str());
+      return;
+    }
+    valorRecebido = doc["value"] | 0.0;
+  } 
+  else {
+    valorRecebido = msg.toFloat();
   }
 
-  // 4) Faz o parsing seguro
-  StaticJsonDocument<128> doc;
-  DeserializationError err = deserializeJson(doc, msg);
-  if (err) {
-    Serial.print("Erro JSON: ");
-    Serial.println(err.c_str());
-    return;
+  // Atualiza a variável correta com base no tópico
+  if (strcmp(topic, mqtt_topic_freio_rec) == 0) {
+    freioRecebidoMQTT = valorRecebido;
+  } else if (strcmp(topic, mqtt_topic_acel_rec) == 0) {
+    acelRecebidoMQTT = valorRecebido;
+  } else if (strcmp(topic, mqtt_topic_temperatura) == 0) {
+    temperatura = valorRecebido;
+  } else if (strcmp(topic, mqtt_topic_proximidade) == 0) {
+    distancia_cm = valorRecebido;
   }
-
-  // 5) Atualiza variáveis
-  if (strcmp(topic, mqtt_topic_freio_rec) == 0)
-    freioRecebidoMQTT = doc["value"] | 0.0;
-  else if (strcmp(topic, mqtt_topic_acelerador)==0) 
-    acel  = doc["value"] | 0.0;
-  else if (strcmp(topic, mqtt_topic_temperatura)==0) 
-    temperatura = doc["value"] | 0.0;
-  else if (strcmp(topic, mqtt_topic_proximidade)==0) 
-    distancia_cm = doc["value"] | 0.0;
 }
 
 //------------------FUNÇÃO PARA PUBLICAR ALARMES---------------
@@ -324,14 +337,14 @@ void publishAlarm(const char* alarme) {
     return;
   }
 
-  if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(300))) {
+  if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
     char timestamp[30];
     time_t now; struct tm tm_utc;
     time(&now); gmtime_r(&now, &tm_utc);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", &tm_utc);
 
     StaticJsonDocument<128> doc;
-    doc["timestemp"] = timestamp;
+    doc["timestamp"] = timestamp;
     doc["alarme"] = alarme; 
 
     String payload;
@@ -351,8 +364,6 @@ void tasktratarFreio(void* pvParameters){
   for(;;){
     if (!client.connected()) connectToMQTT();
     if(carroLigado && !colisaoDetectada){
-      Serial.println("-------------------------------------------");
-      Serial.println(freioRecebidoMQTT);
       if (carroLigado && !colisaoDetectada) {
         if (freioRecebidoMQTT > 0.0) {
           publishAlarm("freio ativo");      
@@ -368,7 +379,7 @@ void tasktratarFreio(void* pvParameters){
       frenagem = false;
     }
     
-    vTaskDelay(pdMS_TO_TICKS(550));
+    vTaskDelay(pdMS_TO_TICKS(300));
   }
 }
 
@@ -381,14 +392,14 @@ void tasktratarCondInv(void* pvParameters){
     }
 
     if(carroLigado && !colisaoDetectada){
-      if(frenagem && acel > 0.0){
+      if(frenagem && (acelRecebidoMQTT > 0.0)){
         publishAlarm("freio+acel");
         digitalWrite(LED_ERRO, HIGH);
       }else{
         digitalWrite(LED_ERRO, LOW);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(700));
+    vTaskDelay(pdMS_TO_TICKS(900));
   }
 }
 
@@ -408,7 +419,7 @@ void tasktratarAirbag(void* pvParameters){
         digitalWrite(LED_ERRO, LOW);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(520));
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 
@@ -419,21 +430,22 @@ void taskVelocidadeLeitura(void* pvParameters){
     if (!client.connected()) {
       connectToMQTT();
     }
-
-    if (carroLigado && !colisaoDetectada) {
-      if(acel > 0){
-        velocidade += acel * ACELERACAO_MAX;
-        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
-      }else if (acel == 0 && frenagem == true){
-        velocidade -= freio * FREIO_MOTOR;
-        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
-      }else{
-        velocidade -= FREIO_MOTOR;
-        velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+    if(carroLigado && !colisaoDetectada){
+      if (carroLigado && !colisaoDetectada) {
+        if(acelRecebidoMQTT > 0 && frenagem == false){
+          velocidade += acelRecebidoMQTT * ACELERACAO_MAX;
+          velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+        }else if (acelRecebidoMQTT == 0 && frenagem == true){
+          velocidade -= freioRecebidoMQTT * FREIO_MOTOR;
+          velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+        }else{
+          velocidade -= FREIO_MOTOR;
+          velocidade = constrain(velocidade, 0, VELOCIDADE_MAXIMA);
+        }
+        publishSensorData(mqtt_topic_velocidade, velocidade);
       }
-      publishSensorData(mqtt_topic_velocidade, velocidade);
     }
-    vTaskDelay(pdMS_TO_TICKS(650));
+    vTaskDelay(pdMS_TO_TICKS(400));
   }
 }
 
@@ -480,7 +492,7 @@ void setup() {
   client.subscribe(mqtt_topic_freio_rec);
   client.subscribe(mqtt_topic_proximidade);
   client.subscribe(mqtt_topic_temperatura);
-  client.subscribe(mqtt_topic_acelerador);
+  client.subscribe(mqtt_topic_acel_rec);
 
   xTaskCreatePinnedToCore(taskMQTTLoop, "MQTT_Loop", 4096, NULL, 3, NULL, 1);
   xTaskCreatePinnedToCore(taskSensorMonitorInfo, "Sensores", 4096, NULL, 1, NULL, 1);
