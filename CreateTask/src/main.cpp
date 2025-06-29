@@ -407,7 +407,7 @@ void tasktratarCondInv(void* pvParameters){
         digitalWrite(LED_ERRO, LOW);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(400));
+    vTaskDelay(pdMS_TO_TICKS(900));
   }
 }
 
