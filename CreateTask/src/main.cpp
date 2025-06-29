@@ -48,10 +48,6 @@ PubSubClient client(espClient);
 DHT dht(DHTPIN, DHTTYPE);
 
 
-// ---------------- PERIODO PRIORIDADE ----------------
-#define timePriotidadeAlta 3000
-#define timePriotidadeMedia 4000
-#define timePriotidadeBaixa 5000
 
 SemaphoreHandle_t mqttMutex;
 
@@ -133,7 +129,7 @@ void publishSensorMonitorInfo() {
   JsonObject s1 = sensors.createNestedObject();
   s1["sensor_id"] = "proximidade";
   s1["data_type"] = "float";
-  s1["data_interval"] = 200;
+  s1["data_interval"] = 300;
 
   JsonObject s2 = sensors.createNestedObject();
   s2["sensor_id"] = "temperatura";
@@ -143,12 +139,12 @@ void publishSensorMonitorInfo() {
   JsonObject s3 = sensors.createNestedObject();
   s3["sensor_id"] = "acelerador";
   s3["data_type"] = "float";
-  s3["data_interval"] = 500;
+  s3["data_interval"] = 1000;
 
   JsonObject s4 = sensors.createNestedObject();
   s4["sensor_id"] = "freio";
   s4["data_type"] = "float";
-  s4["data_interval"] = 300;
+  s4["data_interval"] = 700;
 
   char payload[512];
   serializeJson(doc, payload);
@@ -216,7 +212,7 @@ void taskProximidade(void* pvParameters) {
     if (carroLigado && !colisaoDetectada){
         publishSensorData(mqtt_topic_proximidade, leitura);
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(300));
   }
 }
 
@@ -253,7 +249,7 @@ void taskAceleradorLeitura(void* pvParameters) {
       acel = pedalAcelerador;
       publishSensorData(mqtt_topic_acelerador, acel);
     }
-    vTaskDelay(pdMS_TO_TICKS(800));
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -365,8 +361,7 @@ void tasktratarFreio(void* pvParameters){
     if (!client.connected()) connectToMQTT();
     if(carroLigado && !colisaoDetectada){
       if (carroLigado && !colisaoDetectada) {
-        if (freioRecebidoMQTT > 0.0) {
-          publishAlarm("freio ativo");      
+        if (freioRecebidoMQTT > 0.0) {     
           digitalWrite(LED_FREIO, HIGH);   
           frenagem = true;
         }else{
@@ -414,6 +409,9 @@ void tasktratarAirbag(void* pvParameters){
       if(distancia_cm == 0.0){
         publishAlarm("airbag ativado");
         digitalWrite(LED_AIRBAG, HIGH);
+        digitalWrite(LED_CARRO, LOW);
+        digitalWrite(LED_FREIO, LOW);
+        digitalWrite(LED_ERRO, LOW);
         colisaoDetectada = true;
       }else{
         digitalWrite(LED_ERRO, LOW);
